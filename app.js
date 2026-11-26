@@ -149,6 +149,7 @@ function defaults() {
     budget: { total: 0, cats: {} },
     lastAccount: null,
     migContrib: true,
+    firstUse: Date.now(),
   };
 }
 function load() {
@@ -166,6 +167,7 @@ function fix(s) {
   s.categories.forEach(c => { if (!ICONS[c.icon]) c.icon = EMOJI_MAP[c.icon] || 'dots'; });
   s.accounts.forEach(a => { if (!ICONS[a.icon]) a.icon = EMOJI_MAP[a.icon] || TYPE_ICON[a.type] || 'wallet'; });
   s.budget = Object.assign({ total: 0, cats: {} }, s.budget || {});
+  if (!s.firstUse) { const ds = s.tx.map(t => t.created || 0).filter(Boolean); s.firstUse = ds.length ? Math.min(...ds) : Date.now(); }
   // Разово: якщо накопичення заповнили кнопкою «Вартість» без жодного внеску — перше поповнення вважаємо внеском
   if (!s.migContrib) {
     s.accounts.filter(a => a.type === 'saving' && !(+a.initial)).forEach(a => {
@@ -356,6 +358,7 @@ function viewTx() {
     <div class="sum-cell"><span>Загальний баланс</span><b>${fmt(total)}</b></div>
     <div class="sum-cell"><span>Витрати</span><b>${fmt(exp)}</b></div>
   </div>
+  ${backupBanner()}
   <div class="list">${days || empty}</div>`;
 }
 
@@ -904,7 +907,7 @@ function openSettings() {
     <button class="btn" data-act="export">${bi('save')}Зберегти резервну копію</button>
     <label class="btn">${bi('upload')}Відновити з копії<input type="file" id="s-import" accept=".json,application/json" hidden></label>
     <button class="btn danger" data-act="reset">Видалити всі дані</button>
-    <p class="muted small">Дані зберігаються лише на цьому пристрої. Раз на місяць робіть резервну копію (наприклад, у Файли / iCloud).</p>`);
+    <p class="muted small">Дані зберігаються лише на цьому пристрої. ${S.lastBackup ? `Остання копія: ${new Date(S.lastBackup).toLocaleDateString('uk-UA')}.` : 'Копію ще не зберігали.'} Програма нагадає, якщо копії не було понад 7 днів. Зберігайте її у Файли → iCloud Drive.</p>`);
 }
 async function fetchRates(manual) {
   try {
@@ -949,6 +952,21 @@ function saveCat() {
 
 function exportData() {
   download(`finance-backup-${todayStr()}.json`, JSON.stringify(S), 'application/json');
+  S.lastBackup = Date.now(); save(); render();
+  if (sheetKey === 'settings') openSettings();
+}
+/* Нагадування про резервну копію: раз на 7 днів, «Пізніше» — відкласти на добу */
+const DAY = 864e5;
+function backupDays() { return Math.floor((Date.now() - (S.lastBackup || S.firstUse || Date.now())) / DAY); }
+function needBackup() {
+  return S.tx.length > 0 && backupDays() >= 7 && Date.now() - (S.backupSnooze || 0) > DAY;
+}
+function backupBanner() {
+  if (!needBackup()) return '';
+  const d = backupDays();
+  return `<div class="backup-banner"><span class="acc-ic" style="width:38px;height:38px;border-radius:11px">${ico('save')}</span>
+    <div class="grow"><b>Час зробити резервну копію</b><small>${S.lastBackup ? `Остання — ${d} дн. тому` : 'Ви ще жодного разу не зберігали копію'}</small></div>
+    <div class="bb-btns"><button class="link strong" data-act="export">Зберегти</button><button class="link muted" data-act="backupLater">Пізніше</button></div></div>`;
 }
 function importFile(file) {
   if (!file) return;
@@ -997,6 +1015,7 @@ const ACT = {
   chartKind: d => { chartKind = d.kind; render(); },
   catTx: d => openCatTx(d.id),
   savCur: d => { S.savCur = d.v; save(); render(); },
+  backupLater: () => { S.backupSnooze = Date.now(); save(); render(); toast('Нагадаю завтра'); },
   budgetEdit: () => openBudget(),
   budgetSave: () => saveBudget(),
   report: () => openReport(),

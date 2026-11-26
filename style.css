@@ -117,6 +117,12 @@ svg.i{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke
 .mb.cur span{color:var(--text)}
 
 .cur-seg{margin:0 14px 12px}
+.backup-banner{display:flex;align-items:center;gap:12px;margin:12px 14px 0;padding:12px 14px;background:#2a2410;border:1px solid #4a3d16;border-radius:14px}
+.backup-banner b{display:block;font-size:15px;font-weight:600}
+.backup-banner small{display:block;color:var(--muted);font-size:13px;margin-top:2px}
+.bb-btns{display:flex;flex-direction:column;align-items:flex-end;gap:0}
+.bb-btns .link{padding:3px 0;font-size:15px}
+.bb-btns .muted{color:var(--muted)}
 /* прибуток по місяцях */
 .pbars{display:flex;gap:8px;height:140px;position:relative;margin:30px 0 24px}
 .pb{flex:1;position:relative}

@@ -1,5 +1,5 @@
 // Кеш для роботи без інтернету. Змініть версію після оновлення файлів.
-const CACHE = 'fm-v6';
+const CACHE = 'fm-v7';
 const ASSETS = ['./', './index.html', './style.css', './app.js', './manifest.webmanifest',
   './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'];
 
