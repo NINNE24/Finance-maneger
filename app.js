@@ -425,9 +425,60 @@ function openBudget() {
     <div class="sheet-sub">По категоріях <span id="b-sum" style="text-transform:none">разом: ${fmt(sum())} ₴</span></div>
     <div class="section flat">${S.categories.filter(c => c.kind === 'expense').map(c => `<label class="cat-row"><div class="ic sm" style="background:${c.color}">${ico(c.icon)}</div>
       <span class="grow">${esc(c.name)}</span><input class="b-cat" data-id="${c.id}" inputmode="decimal" placeholder="—" value="${esc(str(BF.cats[c.id]))}"></label>`).join('')}</div>
+    <div class="sheet-sub">Сповіщення</div>
+    <div class="muted small" style="margin:0 2px 6px">Попередження з'являється, коли витрачено 50% місячного бюджету і коли бюджет перевищено.</div>
+    <label class="field"><span>Також системні сповіщення iPhone</span><input type="checkbox" id="b-notif" class="switch" ${S.notif ? 'checked' : ''}></label>
     <button class="btn primary" data-act="budgetSave">Зберегти</button>`);
   BF.sum = sum;
 }
+/* ---------- Сповіщення про бюджет: 50% і перевищення, по одному разу на місяць ---------- */
+const budgetTotal = () => S.budget.total || Object.values(S.budget.cats || {}).reduce((s, v) => s + (+v || 0), 0);
+function checkBudget(date) {
+  const total = budgetTotal();
+  if (!total || !date) return false;
+  const key = date.slice(0, 7), now = new Date();
+  if (key !== monthKey(now.getFullYear(), now.getMonth())) return false; // лише поточний місяць
+  const [y, m] = key.split('-').map(Number);
+  const spent = sumType(monthTx(y, m - 1), 'expense');
+  const fl = (S.budgetAlerts ||= {})[key] ||= {};
+  // якщо витрати зменшились (видалили/змінили операцію) — дозволяємо попередити знову
+  if (spent < total * 0.5) fl.half = false;
+  if (spent <= total) fl.over = false;
+  let kind = null;
+  if (spent > total && !fl.over) { kind = 'over'; fl.over = fl.half = true; }
+  else if (spent >= total * 0.5 && spent <= total && !fl.half) { kind = 'half'; fl.half = true; }
+  save();
+  if (!kind) return false;
+  const left = total - spent, daysLeft = new Date(y, m, 0).getDate() - now.getDate() + 1;
+  const title = kind === 'over' ? 'Місячний бюджет перевищено' : `Витрачено ${fmt(Math.floor(spent / total * 100))}% бюджету`;
+  const body = kind === 'over'
+    ? `Витрачено ${uah(spent)} з ${uah(total)} — перевищення на ${uah(-left)}.`
+    : `Витрачено ${uah(spent)} з ${uah(total)}. Залишилось ${uah(left)} на ${daysLeft} дн. (≈ ${uah(left / daysLeft)} на день).`;
+  gaugeN = 100;
+  setSheet('alert', `
+    <div class="alert-box">${gauge(spent, total, 130)}
+      <h3 class="${kind === 'over' ? 'red' : ''}">${title}</h3><p class="muted">${body}</p></div>
+    <button class="btn primary" data-act="budgetView">Переглянути бюджет</button>
+    <button class="btn" data-act="closeSheet">Зрозуміло</button>`);
+  if (navigator.vibrate) navigator.vibrate(kind === 'over' ? [80, 60, 80] : 60);
+  sysNotify(title, body.replace(/ /g, ' '));
+  return true;
+}
+function sysNotify(title, body) {
+  if (!S.notif || !('Notification' in window) || Notification.permission !== 'granted') return;
+  const opts = { body, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'budget' };
+  if (navigator.serviceWorker?.controller) navigator.serviceWorker.ready.then(r => r.showNotification(title, opts)).catch(() => {});
+  else try { new Notification(title, opts); } catch (e) {}
+}
+async function toggleNotif(on) {
+  if (!on) { S.notif = false; save(); return; }
+  if (!('Notification' in window)) { toast('На iPhone: спершу додайте програму на початковий екран'); S.notif = false; save(); const c = $('#b-notif'); if (c) c.checked = false; return; }
+  const p = await Notification.requestPermission();
+  S.notif = p === 'granted'; save();
+  const c = $('#b-notif'); if (c) c.checked = S.notif;
+  toast(S.notif ? 'Сповіщення увімкнено' : 'Дозвіл не надано — увімкніть у Налаштуваннях iPhone');
+}
+
 function saveBudget() {
   const cats = {}; Object.entries(BF.cats).forEach(([k, v]) => { if (+v > 0) cats[k] = r2(+v); });
   S.budget = { total: r2(+BF.total || 0), cats };
@@ -679,7 +730,8 @@ function saveTx() {
   if (i >= 0) S.tx[i] = rec; else S.tx.push(rec);
   if (F.type !== 'adjust' && rec.accountId && !isSav(acc(rec.accountId))) S.lastAccount = rec.accountId;
   if (!F.id) { const d = parseD(rec.date); VM = { y: d.getFullYear(), m: d.getMonth() }; }
-  save(); closeSheet(); render(); toast('Збережено ✓');
+  save(); closeSheet(); render();
+  if (!checkBudget(rec.date)) toast('Збережено ✓');
 }
 
 /* ---------- Рахунок ---------- */
@@ -905,7 +957,7 @@ function openSettings() {
     <div class="sheet-sub">Звіти та дані</div>
     <button class="btn" data-act="report">${bi('sheet')}Звіт витрат (Excel / PDF)</button>
     <button class="btn" data-act="export">${bi('save')}Зберегти резервну копію</button>
-    <label class="btn">${bi('upload')}Відновити з копії<input type="file" id="s-import" accept=".json,application/json" hidden></label>
+    <label class="btn">${bi('upload')}Відновити з копії<input type="file" id="s-import" accept=".json,.txt,application/json,text/plain" hidden></label>
     <button class="btn danger" data-act="reset">Видалити всі дані</button>
     <p class="muted small">Дані зберігаються лише на цьому пристрої. ${S.lastBackup ? `Остання копія: ${new Date(S.lastBackup).toLocaleDateString('uk-UA')}.` : 'Копію ще не зберігали.'} Програма нагадає, якщо копії не було понад 7 днів. Зберігайте її у Файли → iCloud Drive.</p>`);
 }
@@ -996,7 +1048,8 @@ const ACT = {
   txType: d => { F.type = d.type; F.toTouched = false; syncToAmount(); drawTx(); },
   txCat: d => { F.categoryId = d.id; root.querySelectorAll('.cat').forEach(b => b.classList.toggle('on', b.dataset.id === d.id)); },
   saveTx: () => saveTx(),
-  delTx: () => { if (confirm('Видалити операцію?')) { S.tx = S.tx.filter(t => t.id !== F.id); save(); closeSheet(); render(); } },
+  delTx: () => { if (confirm('Видалити операцію?')) { const d = F.date; S.tx = S.tx.filter(t => t.id !== F.id); save(); closeSheet(); render(); checkBudget(d); } },
+  budgetView: () => { closeSheet(); tab = 'charts'; chartKind = 'budget'; const n = new Date(); VM = { y: n.getFullYear(), m: n.getMonth() }; render(); window.scrollTo(0, 0); },
   closeSheet: () => closeSheet(),
   settings: () => openSettings(),
   account: d => openAccount(d.id),
@@ -1070,6 +1123,7 @@ document.addEventListener('change', e => {
     const v = num(t.value); if (v > 0) { S.rates[id === 's-usd' ? 'USD' : 'EUR'] = v; S.rates.auto = false; save(); render(); openSettings(); }
   }
   if (id === 'r-inc' && RF) { RF.income = t.checked; drawReport(); }
+  if (id === 'b-notif') toggleNotif(t.checked);
   if (id === 's-import') importFile(t.files[0]);
 });
 document.addEventListener('keydown', e => {

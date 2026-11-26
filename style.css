@@ -117,6 +117,9 @@ svg.i{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke
 .mb.cur span{color:var(--text)}
 
 .cur-seg{margin:0 14px 12px}
+.alert-box{text-align:center;padding:22px 6px 8px}
+.alert-box h3{margin:14px 0 6px;font-size:20px}
+.alert-box p{margin:0 0 8px;line-height:1.45}
 .backup-banner{display:flex;align-items:center;gap:12px;margin:12px 14px 0;padding:12px 14px;background:#2a2410;border:1px solid #4a3d16;border-radius:14px}
 .backup-banner b{display:block;font-size:15px;font-weight:600}
 .backup-banner small{display:block;color:var(--muted);font-size:13px;margin-top:2px}

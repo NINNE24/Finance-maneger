@@ -1,5 +1,11 @@
 // Кеш для роботи без інтернету. Змініть версію після оновлення файлів.
-const CACHE = 'fm-v7';
+const CACHE = 'fm-v9';
+
+// Натискання на сповіщення — відкрити програму
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window' }).then(cs => cs.length ? cs[0].focus() : self.clients.openWindow('./')));
+});
 const ASSETS = ['./', './index.html', './style.css', './app.js', './manifest.webmanifest',
   './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'];
 
