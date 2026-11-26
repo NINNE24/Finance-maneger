@@ -491,21 +491,25 @@ function viewSavings() {
     const cls = p.profit >= 0 ? 'green' : 'red';
     return `<small class="${cls}">${sgn(p.profit)}${fmt(p.profit)} ${CUR[p.a.currency]} (${sgn(p.pct)}${fmt(p.pct)}%)</small>${p.annual?.rate != null ? `<small class="${annualCls(p.annual)}">${sgn(p.annual.rate)}${fmt(p.annual.rate)}% річних</small>` : ''}`;
   };
+  const C = savCur(), cm = v => fmt(v / rate(C)) + ' ' + CUR[C];
+  const others = CURS.filter(c => c !== C).map(c => `${fmt(sv.total / rate(c))} ${CUR[c]}`).join(' · ');
   const groups = ['saving', 'invest'].map(t => {
     const g = sv.per.filter(p => p.a.type === t); if (!g.length) return '';
-    return `<div class="section"><div class="section-h"><span>${TYPES[t]}</span><span>${uah(g.reduce((s, p) => s + p.uah, 0))}</span></div>${g.map(p => accRow(p.a, extra(p))).join('')}</div>`;
+    return `<div class="section"><div class="section-h"><span>${TYPES[t]}</span><span>${cm(g.reduce((s, p) => s + p.uah, 0))}</span></div>${g.map(p => accRow(p.a, extra(p))).join('')}</div>`;
   }).join('');
   return head + `
+  <div class="seg cur-seg">${CURS.map(c => `<button data-act="savCur" data-v="${c}" class="${C === c ? 'on' : ''}">${CUR[c]} ${c}</button>`).join('')}</div>
   <div class="card hero"><small class="muted">Усього накопичено</small>
-    <div class="big">${uah(sv.total)}</div>
-    <div class="muted small">≈ ${fmt(sv.total / rate('USD'))} $ · ${fmt(sv.total / rate('EUR'))} €</div>
-    <div class="row2"><div class="mini"><span>Вкладено</span><b>${uah(sv.contrib)}</b></div>
-      <div class="mini"><span>Прибуток</span><b class="${sv.profit >= 0 ? 'green' : 'red'}">${sgn(sv.profit)}${uah(sv.profit)}</b><div class="small ${sv.profit >= 0 ? 'green' : 'red'}">${sgn(sv.pct)}${fmt(sv.pct)}%</div></div></div>
+    <div class="big">${cm(sv.total)}</div>
+    <div class="muted small">≈ ${others}</div>
+    <div class="row2"><div class="mini"><span>Вкладено</span><b>${cm(sv.contrib)}</b></div>
+      <div class="mini"><span>Прибуток</span><b class="${sv.profit >= 0 ? 'green' : 'red'}">${sgn(sv.profit)}${cm(sv.profit)}</b><div class="small ${sv.profit >= 0 ? 'green' : 'red'}">${sgn(sv.pct)}${fmt(sv.pct)}%</div></div></div>
     <div class="mini annual"><span>Дохідність, % річних</span>
       <div class="flex"><b class="${annualCls(sv.annual)}">${annualTxt(sv.annual)}</b>${sv.annual?.rate != null ? `<small class="muted">за ${periodTxt(sv.annual.days)}</small>` : ''}</div></div></div>
-  ${profitChart()}
+  ${profitChart(C)}
   ${segs.length ? `<div class="card"><div class="card-h"><span>Розподіл</span><span>${byCur.map(x => `${CUR[x.c]} ${fmt(x.v / sv.total * 100)}%`).join(' · ')}</span></div>
-    <div class="chart-wrap">${donut(segs, short(sv.total), 'грн')}${legend(segs, sv.total)}</div></div>` : ''}
+    <div class="chart-wrap">${donut(segs, short(sv.total / rate(C)), CUR[C] === '₴' ? 'грн' : C)}${legend(segs, sv.total)}</div></div>` : ''}
+  ${C !== 'UAH' ? `<p class="muted small" style="padding:0 18px;margin-top:-4px">Суми в ${CUR[C]} перераховано за поточним курсом НБУ (1 ${CUR[C]} = ${fmt(rate(C))} ₴).</p>` : ''}
   ${groups}
   <p class="muted small" style="padding:0 18px">Поповнити — кнопка <b>+</b> внизу (переказ на рахунок накопичень, не рахується як витрата). Коли змінюється вартість — відкрийте рахунок і натисніть «Вартість».</p>`;
 }
@@ -525,15 +529,17 @@ function profitByMonth(n = 6) {
   }
   return out;
 }
-function profitChart() {
-  const arr = profitByMonth(), max = Math.max(...arr.map(a => Math.abs(a.v)), 1);
+const savCur = () => CURS.includes(S.savCur) ? S.savCur : 'UAH';
+const shortN = v => v < 100 ? fmt(v) : short(v);
+function profitChart(C = 'UAH') {
+  const arr = profitByMonth().map(a => ({ ...a, v: r2(a.v / rate(C)) })), max = Math.max(...arr.map(a => Math.abs(a.v)), 0.01);
   const hasNeg = arr.some(a => a.v < 0), hasPos = arr.some(a => a.v > 0);
   const z = hasNeg && hasPos ? 50 : hasNeg ? 100 : 0, span = hasNeg && hasPos ? 50 : 100;
   const sum = arr.reduce((s, a) => s + a.v, 0);
-  return `<div class="card"><div class="card-h"><span>Прибуток по місяцях</span><span class="${sum >= 0 ? 'green' : 'red'}">${sgn(sum)}${short(Math.abs(sum)).replace(/^/, sum < 0 ? '-' : '')} ₴ за 6 міс.</span></div>
+  return `<div class="card"><div class="card-h"><span>Прибуток по місяцях</span><span class="${sum >= 0 ? 'green' : 'red'}">${sum < 0 ? '-' : sgn(sum)}${shortN(Math.abs(sum))} ${CUR[C]} за 6 міс.</span></div>
     <div class="pbars">${arr.map((a, i) => {
       const h = Math.max(Math.abs(a.v) / max * span, a.v ? 2 : 0), pos = a.v >= 0;
-      const lbl = a.v ? `<small class="${pos ? 'green' : 'red'}" style="${pos ? `bottom:calc(${z + h}% + 3px)` : `top:calc(${100 - z + h}% + 3px)`}">${pos ? '+' : '-'}${short(Math.abs(a.v))}</small>` : '';
+      const lbl = a.v ? `<small class="${pos ? 'green' : 'red'}" style="${pos ? `bottom:calc(${z + h}% + 3px)` : `top:calc(${100 - z + h}% + 3px)`}">${pos ? '+' : '-'}${shortN(Math.abs(a.v))}</small>` : '';
       return `<div class="pb ${i === arr.length - 1 ? 'cur' : ''}">${a.v ? `<i class="${pos ? 'pos' : 'neg'}" style="${pos ? `bottom:${z}%` : `top:${100 - z}%`};height:${h}%"></i>` : ''}${lbl}</div>`;
     }).join('')}<div class="zero" style="bottom:${z}%"></div></div>
     <div class="pb-labels">${arr.map((a, i) => `<span class="${i === arr.length - 1 ? 'cur' : ''}">${MSHORT[a.m]}</span>`).join('')}</div></div>`;
@@ -990,6 +996,7 @@ const ACT = {
   addOp: d => openTx(null, { accountId: d.id }),
   chartKind: d => { chartKind = d.kind; render(); },
   catTx: d => openCatTx(d.id),
+  savCur: d => { S.savCur = d.v; save(); render(); },
   budgetEdit: () => openBudget(),
   budgetSave: () => saveBudget(),
   report: () => openReport(),

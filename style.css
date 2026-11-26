@@ -116,6 +116,7 @@ svg.i{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke
 .mb.cur i{background:var(--acc)}
 .mb.cur span{color:var(--text)}
 
+.cur-seg{margin:0 14px 12px}
 /* прибуток по місяцях */
 .pbars{display:flex;gap:8px;height:140px;position:relative;margin:30px 0 24px}
 .pb{flex:1;position:relative}
