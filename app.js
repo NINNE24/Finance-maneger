@@ -146,7 +146,9 @@ function defaults() {
     ],
     tx: [],
     rates: { USD: 41.5, EUR: 48.5, updated: null, auto: true },
+    budget: { total: 0, cats: {} },
     lastAccount: null,
+    migContrib: true,
   };
 }
 function load() {
@@ -163,6 +165,17 @@ function fix(s) {
   // старі емодзі → нові іконки
   s.categories.forEach(c => { if (!ICONS[c.icon]) c.icon = EMOJI_MAP[c.icon] || 'dots'; });
   s.accounts.forEach(a => { if (!ICONS[a.icon]) a.icon = EMOJI_MAP[a.icon] || TYPE_ICON[a.type] || 'wallet'; });
+  s.budget = Object.assign({ total: 0, cats: {} }, s.budget || {});
+  // Разово: якщо накопичення заповнили кнопкою «Вартість» без жодного внеску — перше поповнення вважаємо внеском
+  if (!s.migContrib) {
+    s.accounts.filter(a => a.type === 'saving' && !(+a.initial)).forEach(a => {
+      const hasContrib = s.tx.some(t => (t.type === 'transfer' && t.toAccountId === a.id) || (t.type === 'adjust' && t.contrib && t.accountId === a.id));
+      if (hasContrib) return;
+      const first = s.tx.filter(t => t.type === 'adjust' && t.accountId === a.id && t.amount > 0).sort((x, y) => x.date < y.date ? -1 : x.date > y.date ? 1 : (x.created || 0) - (y.created || 0))[0];
+      if (first) first.contrib = true;
+    });
+    s.migContrib = true;
+  }
   return s;
 }
 let S = load();
@@ -228,9 +241,11 @@ function accStart(a) {
 function accFlows(a, conv = 1) {
   const fl = [];
   if (+a.initial) fl.push({ d: accStart(a), v: -a.initial * conv });
-  for (const t of S.tx) if (t.type === 'transfer') {
-    if (t.toAccountId === a.id) fl.push({ d: t.date, v: -(t.toAmount ?? t.amount) * conv });
-    if (t.accountId === a.id) fl.push({ d: t.date, v: t.amount * conv });
+  for (const t of S.tx) {
+    if (t.type === 'transfer') {
+      if (t.toAccountId === a.id) fl.push({ d: t.date, v: -(t.toAmount ?? t.amount) * conv });
+      if (t.accountId === a.id) fl.push({ d: t.date, v: t.amount * conv });
+    } else if (t.type === 'adjust' && t.contrib && t.accountId === a.id) fl.push({ d: t.date, v: -t.amount * conv });
   }
   return fl;
 }
@@ -238,9 +253,11 @@ function savStats(list = savAccs()) {
   const today = todayStr(), all = [];
   const per = list.map(a => {
     let contrib = +a.initial || 0;
-    for (const t of S.tx) if (t.type === 'transfer') {
-      if (t.toAccountId === a.id) contrib += (t.toAmount ?? t.amount);
-      if (t.accountId === a.id) contrib -= t.amount;
+    for (const t of S.tx) {
+      if (t.type === 'transfer') {
+        if (t.toAccountId === a.id) contrib += (t.toAmount ?? t.amount);
+        if (t.accountId === a.id) contrib -= t.amount;
+      } else if (t.type === 'adjust' && t.contrib && t.accountId === a.id) contrib += t.amount;
     }
     const bal = B[a.id] || 0;
     all.push(...accFlows(a, rate(a.currency)), { d: today, v: toUAH(bal, a.currency) });
@@ -274,7 +291,7 @@ function txRow(t) {
   if (t.type === 'adjust') {
     return `<button class="tx" data-act="editTx" data-id="${t.id}">
       <div class="ic" style="background:#3a3a3d">${ico('scale')}</div>
-      <div class="t grow"><b>${isSav(a) ? 'Зміна вартості' : 'Коригування балансу'}</b><small>${esc(a?.name || '')}${t.note ? ' · ' + esc(t.note) : ''}</small></div>
+      <div class="t grow"><b>${t.contrib ? (t.amount >= 0 ? 'Внесок' : 'Зняття') : isSav(a) ? 'Зміна вартості' : 'Коригування балансу'}</b><small>${esc(a?.name || '')}${t.note ? ' · ' + esc(t.note) : ''}</small></div>
       <div class="a ${t.amount >= 0 ? 'green' : 'red'}">${sgn(t.amount)}${money(t.amount, cur)}</div></button>`;
   }
   const c = cat(t.categoryId), inc = t.type === 'income';
@@ -322,7 +339,6 @@ function viewTx() {
   const list = monthTx().sort(byDateDesc);
   const total = totalUAH(S.accounts.filter(inTotal));
   const exp = sumType(list, 'expense');
-  const sv = savStats();
   const byDay = {};
   for (const t of list) (byDay[t.date] ||= []).push(t);
   const days = Object.keys(byDay).sort().reverse().map(d => {
@@ -340,13 +356,83 @@ function viewTx() {
     <div class="sum-cell"><span>Загальний баланс</span><b>${fmt(total)}</b></div>
     <div class="sum-cell"><span>Витрати</span><b>${fmt(exp)}</b></div>
   </div>
-  ${sv.per.length ? `<button class="invest-strip" data-act="tab" data-tab="invest"><span class="acc-ic" style="width:34px;height:34px;border-radius:10px">${ico('stack')}</span>
-    <span class="grow"><small>Накопичення</small><b>${uah(sv.total)}</b></span>
-    ${sv.profit ? `<span class="pr ${sv.profit >= 0 ? 'green' : 'red'}">${sgn(sv.profit)}${fmt(sv.profit)} ₴ (${sgn(sv.pct)}${fmt(sv.pct)}%)</span>` : ''}${ICON.chev}</button>` : ''}
   <div class="list">${days || empty}</div>`;
 }
 
+function chartsHead() {
+  const K = { expense: 'Витрати', income: 'Доходи', budget: 'Бюджет' };
+  return `<header class="top"><span class="icon-btn"></span>
+    <div class="seg seg3">${Object.entries(K).map(([k, v]) => `<button data-act="chartKind" data-kind="${k}" class="${chartKind === k ? 'on' : ''}">${v}</button>`).join('')}</div>
+    <button class="icon-btn" data-act="report" aria-label="Звіт">${ICON.dl}</button></header>
+  <div class="month-nav"><button data-act="prevMonth">‹</button><b>${MONTHS[VM.m]} ${VM.y}</b><button data-act="nextMonth">›</button></div>`;
+}
+
+/* ---------- Бюджет ---------- */
+let gaugeN = 0;
+function gauge(spent, budget, size = 120) {
+  const left = budget - spent, over = left < 0;
+  const p = budget > 0 ? Math.max(0, Math.min(1, left / budget)) : 0;
+  const y = 6 + (1 - p) * 88, id = 'gc' + (++gaugeN), col = over ? 'var(--red)' : p < .15 ? '#F08A4B' : 'var(--acc)';
+  const w = 'q12.5 -5 25 0 t25 0 t25 0 t25 0 t25 0 t25 0 t25 0 t25 0';
+  return `<svg class="gauge" viewBox="0 0 100 100" style="width:${size}px;height:${size}px">
+    <defs><clipPath id="${id}"><circle cx="50" cy="50" r="44"/></clipPath></defs>
+    <circle cx="50" cy="50" r="44" fill="#232326"/>
+    <g clip-path="url(#${id})"><path class="wave" d="M-50 ${y} ${w} V110 H-50z" fill="${col}" opacity=".9"/><path class="wave w2" d="M-50 ${y + 2} ${w} V110 H-50z" fill="${col}" opacity=".45"/></g>
+    <circle cx="50" cy="50" r="47" fill="none" stroke="${col}" stroke-width="3"/>
+    <text x="50" y="49" text-anchor="middle" class="g-main">${over ? 'Перевищено' : fmt(p * 100) + '%'}</text>
+    <text x="50" y="62" text-anchor="middle" class="g-sub">${over ? 'на ' + short(-left) : 'залишилося'}</text></svg>`;
+}
+function budgetCard(title, iconHtml, budget, spent, act = '') {
+  const left = budget - spent;
+  return `<div class="card budget"${act}><div class="b-info">
+      <div class="b-title">${iconHtml}${title}</div>
+      <div class="flex"><span class="muted">Бюджет</span><span>${fmt(budget)}</span></div>
+      <div class="flex"><span class="muted">Витрати</span><span>${fmt(spent)}</span></div>
+      <div class="flex b-left"><span class="muted">Залишилося</span><b class="${left < 0 ? 'red' : ''}">${fmt(left)}</b></div>
+    </div>${gauge(spent, budget, iconHtml ? 104 : 124)}</div>`;
+}
+function viewBudget() {
+  gaugeN = 0;
+  const bd = S.budget, list = monthTx().filter(t => t.type === 'expense');
+  const spentBy = {}; list.forEach(t => { const k = t.categoryId || ''; spentBy[k] = (spentBy[k] || 0) + txUAH(t); });
+  const spent = list.reduce((s, t) => s + txUAH(t), 0);
+  const catIds = Object.keys(bd.cats).filter(id => bd.cats[id] > 0 && S.categories.some(c => c.id === id));
+  if (!bd.total && !catIds.length) return chartsHead() + `<div class="empty">${emptyIco('target')}Встановіть, скільки плануєте витрачати за місяць — загалом і по категоріях.<br><br>
+    <button class="btn primary" data-act="budgetEdit">Налаштувати бюджет</button></div>`;
+  const now = new Date(), isCur = VM.y === now.getFullYear() && VM.m === now.getMonth();
+  const daysLeft = isCur ? new Date(VM.y, VM.m + 1, 0).getDate() - now.getDate() + 1 : 0;
+  const total = bd.total || catIds.reduce((s, id) => s + bd.cats[id], 0);
+  const noBudget = Object.entries(spentBy).filter(([k]) => !catIds.includes(k)).reduce((s, [, v]) => s + v, 0);
+  return chartsHead() + `
+  ${budgetCard('Місячний бюджет', '', total, spent, ' data-act="budgetEdit"')}
+  ${isCur && total - spent > 0 ? `<div class="b-day muted small">Можна витрачати ≈ <b>${uah((total - spent) / daysLeft)}</b> на день до кінця місяця</div>` : ''}
+  ${catIds.map(id => { const c = cat(id); return budgetCard(esc(c.name), `<span class="ic sm" style="background:${c.color}">${ico(c.icon)}</span>`, bd.cats[id], spentBy[id] || 0, ` data-act="catTx" data-id="${id}"`); }).join('')}
+  ${catIds.length && noBudget ? `<div class="b-day muted small">Витрати в категоріях без бюджету: ${uah(noBudget)}</div>` : ''}
+  <button class="btn primary mx" data-act="budgetEdit">${bi('plus')}Налаштування бюджету</button>`;
+}
+let BF = null;
+function openBudget() {
+  resetForms();
+  BF = { total: S.budget.total || 0, cats: { ...S.budget.cats } };
+  const sum = () => Object.values(BF.cats).reduce((s, v) => s + (+v || 0), 0);
+  setSheet('budget', `
+    <div class="sheet-head"><button class="link" data-act="closeSheet" style="justify-self:start">Скасувати</button><b>Бюджет на місяць</b><button class="link strong" data-act="budgetSave">Готово</button></div>
+    <label class="field"><span>Загальний бюджет, ₴</span><input id="b-total" inputmode="decimal" placeholder="0" value="${esc(str(BF.total))}"></label>
+    <div class="hint">Якщо не вказати — дорівнюватиме сумі бюджетів категорій</div>
+    <div class="sheet-sub">По категоріях <span id="b-sum" style="text-transform:none">разом: ${fmt(sum())} ₴</span></div>
+    <div class="section flat">${S.categories.filter(c => c.kind === 'expense').map(c => `<label class="cat-row"><div class="ic sm" style="background:${c.color}">${ico(c.icon)}</div>
+      <span class="grow">${esc(c.name)}</span><input class="b-cat" data-id="${c.id}" inputmode="decimal" placeholder="—" value="${esc(str(BF.cats[c.id]))}"></label>`).join('')}</div>
+    <button class="btn primary" data-act="budgetSave">Зберегти</button>`);
+  BF.sum = sum;
+}
+function saveBudget() {
+  const cats = {}; Object.entries(BF.cats).forEach(([k, v]) => { if (+v > 0) cats[k] = r2(+v); });
+  S.budget = { total: r2(+BF.total || 0), cats };
+  save(); closeSheet(); chartKind = 'budget'; tab = 'charts'; render();
+}
+
 function viewCharts() {
+  if (chartKind === 'budget') return viewBudget();
   const list = monthTx().filter(t => t.type === chartKind);
   const by = {}, cnt = {};
   for (const t of list) { const k = t.categoryId || ''; by[k] = (by[k] || 0) + txUAH(t); cnt[k] = (cnt[k] || 0) + 1; }
@@ -360,11 +446,7 @@ function viewCharts() {
   const max = Math.max(...arr.map(a => a.v), 1);
   const prev = arr.slice(0, 5).filter(a => a.v);
   const avg = prev.length ? prev.reduce((s, a) => s + a.v, 0) / prev.length : 0;
-  return `
-  <header class="top"><span class="icon-btn"></span>
-    <div class="seg"><button data-act="chartKind" data-kind="expense" class="${chartKind === 'expense' ? 'on' : ''}">Витрати</button><button data-act="chartKind" data-kind="income" class="${chartKind === 'income' ? 'on' : ''}">Доходи</button></div>
-    <button class="icon-btn" data-act="report" aria-label="Звіт">${ICON.dl}</button></header>
-  <div class="month-nav"><button data-act="prevMonth">‹</button><b>${MONTHS[VM.m]} ${VM.y}</b><button data-act="nextMonth">›</button></div>
+  return chartsHead() + `
   ${total ? `
   <div class="card"><div class="chart-wrap">${donut(items, fmt(total), chartKind === 'expense' ? 'витрачено' : 'отримано')}${legend(items, total)}</div></div>
   <div class="section">${items.map(i => `<button class="cat-row" data-act="catTx" data-id="${i.id}">
@@ -453,12 +535,12 @@ function setSheet(key, html, onMount) {
 }
 function closeSheet() {
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-  F = AF = CF = RF = null; sheetKey = null;
+  F = AF = CF = RF = null; BF = null; sheetKey = null;
   root.classList.remove('open');
   const g = ++sheetGen;
   setTimeout(() => { if (g === sheetGen) root.innerHTML = ''; }, 300);
 }
-const resetForms = () => { F = AF = CF = RF = null; };
+const resetForms = () => { F = AF = CF = RF = null; BF = null; };
 function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('show'), 2200);
@@ -510,7 +592,8 @@ function drawTx(focus) {
   const amtCur = external ? (to?.currency || 'UAH') : (from?.currency || 'UAH');
   setSheet('tx', `
     <div class="sheet-head"><button class="link" data-act="closeSheet" style="justify-self:start">Скасувати</button><b>${F.id ? 'Редагування' : 'Нова операція'}</b><button class="link strong" data-act="saveTx">Готово</button></div>
-    ${isAdj ? `<div class="center muted">${isSav(from) ? 'Зміна вартості' : 'Коригування балансу'} (може бути мінусом)</div>`
+    ${isAdj ? `<div class="center muted">${isSav(from) ? 'Зміна балансу' : 'Коригування балансу'} (може бути мінусом)</div>
+      ${isSav(from) ? `<label class="field"><span>Це внесок, а не прибуток</span><input type="checkbox" id="f-contrib" class="switch" ${F.contrib ? 'checked' : ''}></label>` : ''}`
       : `<div class="seg">${Object.keys(T).map(k => `<button data-act="txType" data-type="${k}" class="${F.type === k ? 'on' : ''}">${T[k]}</button>`).join('')}</div>`}
     <div class="amount-box ${F.type}"><input id="f-amount" inputmode="decimal" placeholder="0" value="${esc(F.amountStr)}" autocomplete="off"><span>${CUR[amtCur]}</span></div>
     ${isT ? `
@@ -540,6 +623,7 @@ function saveTx() {
   const external = F.type === 'transfer' && !F.accountId;
   if (!external && !acc(F.accountId)) return toast('Оберіть рахунок');
   const rec = { id: F.id || uid(), type: F.type, amount: amt, accountId: external ? null : F.accountId, date: F.date || todayStr(), note: (F.note || '').trim(), created: F.created || Date.now() };
+  if (F.type === 'adjust' && F.contrib) rec.contrib = true;
   if (F.type === 'expense' || F.type === 'income') {
     if (!F.categoryId) return toast('Оберіть категорію');
     rec.categoryId = F.categoryId;
@@ -577,7 +661,7 @@ function openAccount(id) {
     <div class="btn-row" style="margin-top:10px">
       <button class="btn" data-act="addOp" data-id="${id}">${bi('plus')}Операція</button>
       <button class="btn" data-act="topup" data-id="${id}">${bi('transfer')}Поповнити</button>
-      <button class="btn" data-act="adjust" data-id="${id}">${bi('scale')}${isSav(a) ? 'Вартість' : 'Баланс'}</button></div>
+      <button class="btn" data-act="adjust" data-id="${id}">${bi('scale')}${a.type === 'invest' ? 'Вартість' : 'Баланс'}</button></div>
     <div class="sheet-sub">Операції</div>
     <div style="margin:0 -16px">${txs.map(txRow).join('') || '<div class="empty">Ще немає операцій</div>'}</div>`);
 }
@@ -634,13 +718,22 @@ function openAdjust(id) {
   setSheet('adj', `
     <div class="sheet-head"><button class="link" data-act="account" data-id="${id}" style="justify-self:start">Назад</button><b>${isSav(a) ? 'Поточна вартість' : 'Фактичний баланс'}</b><button class="link strong" data-act="saveAdjust" data-id="${id}">Готово</button></div>
     <div class="amount-box"><input id="adj-val" inputmode="decimal" value="${esc(str(B[id] || 0))}" placeholder="0"><span>${CUR[a.currency]}</span></div>
-    <p class="muted small center">${isSav(a) ? 'Скільки зараз коштують активи на цьому рахунку? Різниця запишеться як прибуток або збиток.' : 'Вкажіть реальний залишок. Різниця запишеться як коригування і не потрапить у витрати чи доходи.'}</p>
+    ${isSav(a) ? `<div class="seg"><button data-act="adjMode" data-v="contrib" class="${a.type === 'saving' ? 'on' : ''}">Я доклав / зняв гроші</button><button data-act="adjMode" data-v="profit" class="${a.type === 'saving' ? '' : 'on'}">Змінилась вартість</button></div>
+    <p class="muted small center" id="adj-hint"></p>`
+    : '<p class="muted small center">Вкажіть реальний залишок. Різниця запишеться як коригування і не потрапить у витрати чи доходи.</p>'}
     <button class="btn primary" data-act="saveAdjust" data-id="${id}">Зберегти</button>`,
-    sh => { const i = sh.querySelector('#adj-val'); i.focus(); i.select(); });
+    sh => { adjHint(); const i = sh.querySelector('#adj-val'); i.focus(); i.select(); });
+}
+function adjHint() {
+  const h = $('#adj-hint'); if (!h) return;
+  h.textContent = $('[data-act=adjMode].on')?.dataset.v === 'contrib'
+    ? 'Різниця запишеться як ваш внесок — піде у «Вкладено», а не в прибуток.'
+    : 'Різниця запишеться як прибуток або збиток (зміна ціни активів, відсотки).';
 }
 function saveAdjust(id) {
   const v = num($('#adj-val').value), diff = r2(v - (B[id] || 0));
-  if (diff) S.tx.push({ id: uid(), type: 'adjust', amount: diff, accountId: id, date: todayStr(), note: '', created: Date.now() });
+  const contrib = $('[data-act=adjMode].on')?.dataset.v === 'contrib';
+  if (diff) S.tx.push({ id: uid(), type: 'adjust', amount: diff, accountId: id, date: todayStr(), note: '', created: Date.now(), ...(contrib ? { contrib: true } : {}) });
   save(); render(); openAccount(id);
 }
 
@@ -648,7 +741,8 @@ function saveAdjust(id) {
 function openCatTx(id) {
   resetForms();
   const c = cat(id);
-  const list = monthTx().filter(t => t.type === chartKind && (t.categoryId || '') === id).sort(byDateDesc);
+  const kind = chartKind === 'income' ? 'income' : 'expense';
+  const list = monthTx().filter(t => t.type === kind && (t.categoryId || '') === id).sort(byDateDesc);
   setSheet('cattx', `
     <div class="sheet-head"><span></span><b>${esc(c.name)}</b><button class="link strong" data-act="closeSheet">Закрити</button></div>
     <div class="center muted small">${MONTHS[VM.m]} ${VM.y} · ${uah(list.reduce((s, t) => s + txUAH(t), 0))}</div>
@@ -860,11 +954,14 @@ const ACT = {
   saveAccount: () => saveAccount(),
   delAccount: () => delAccount(),
   adjust: d => openAdjust(d.id),
+  adjMode: (d, el) => { root.querySelectorAll('[data-act=adjMode]').forEach(b => b.classList.toggle('on', b === el)); adjHint(); },
   saveAdjust: d => saveAdjust(d.id),
   topup: d => openTx(null, { type: 'transfer', toAccountId: d.id }),
   addOp: d => openTx(null, { accountId: d.id }),
   chartKind: d => { chartKind = d.kind; render(); },
   catTx: d => openCatTx(d.id),
+  budgetEdit: () => openBudget(),
+  budgetSave: () => saveBudget(),
   report: () => openReport(),
   repPeriod: d => { RF.period = d.v; drawReport(); },
   repCsv: () => reportCsv(),
@@ -897,6 +994,10 @@ document.addEventListener('input', e => {
   }
   if (AF) { if (id === 'a-name') AF.name = t.value; if (id === 'a-initial') AF.initial = num(t.value); if (id === 'a-start') AF.startDate = t.value; }
   if (CF && id === 'c-name') CF.name = t.value;
+  if (BF) {
+    if (id === 'b-total') BF.total = num(t.value);
+    if (t.classList.contains('b-cat')) { BF.cats[t.dataset.id] = num(t.value); const s = $('#b-sum'); if (s) s.textContent = `разом: ${fmt(BF.sum())} ₴`; }
+  }
 });
 document.addEventListener('change', e => {
   const t = e.target, id = t.id;
@@ -907,6 +1008,7 @@ document.addEventListener('change', e => {
   if (F && id === 'f-date') F.date = t.value;
   if (AF && id === 'a-start') AF.startDate = t.value;
   if (AF && id === 'a-total') AF.inTotal = t.checked;
+  if (F && id === 'f-contrib') F.contrib = t.checked;
   if (id === 's-auto') { S.rates.auto = t.checked; save(); if (t.checked) fetchRates(true); }
   if (id === 's-usd' || id === 's-eur') {
     const v = num(t.value); if (v > 0) { S.rates[id === 's-usd' ? 'USD' : 'EUR'] = v; S.rates.auto = false; save(); render(); openSettings(); }

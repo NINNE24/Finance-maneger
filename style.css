@@ -116,6 +116,22 @@ svg.i{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke
 .mb.cur i{background:var(--acc)}
 .mb.cur span{color:var(--text)}
 
+/* бюджет */
+.top .seg.seg3{width:270px}
+.card.budget{display:flex;align-items:center;gap:14px;cursor:pointer}
+.b-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;font-size:15px}
+.b-title{display:flex;align-items:center;gap:10px;font-weight:600;font-size:17px;margin-bottom:4px}
+.b-left{border-top:1px dashed #3a3a3d;padding-top:8px}
+.b-day{padding:0 18px 12px;margin-top:-4px}
+.b-day b{color:var(--text)}
+.gauge{flex:none}
+.gauge .wave{animation:wave 3.2s linear infinite}
+.gauge .wave.w2{animation-duration:4.6s;animation-direction:reverse}
+@keyframes wave{to{transform:translateX(50px)}}
+.g-main{fill:#fff;font-size:13px;font-weight:700;paint-order:stroke;stroke:rgba(0,0,0,.45);stroke-width:2.5px}
+.g-sub{fill:#eee;font-size:8px;paint-order:stroke;stroke:rgba(0,0,0,.45);stroke-width:2px}
+.cat-row .b-cat{width:110px;text-align:right;background:var(--card2);border:0;border-radius:8px;color:var(--text);font:inherit;font-size:16px;padding:8px 10px;outline:none}
+
 /* шторка */
 #sheet-root .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);opacity:0;transition:opacity .25s;z-index:20}
 #sheet-root .sheet{position:fixed;left:0;right:0;bottom:var(--kb,0px);max-width:600px;margin:0 auto;max-height:calc(var(--vvh,100vh) - var(--st) - 16px);overflow-y:auto;
