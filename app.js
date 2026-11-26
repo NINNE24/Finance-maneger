@@ -503,10 +503,40 @@ function viewSavings() {
       <div class="mini"><span>Прибуток</span><b class="${sv.profit >= 0 ? 'green' : 'red'}">${sgn(sv.profit)}${uah(sv.profit)}</b><div class="small ${sv.profit >= 0 ? 'green' : 'red'}">${sgn(sv.pct)}${fmt(sv.pct)}%</div></div></div>
     <div class="mini annual"><span>Дохідність, % річних</span>
       <div class="flex"><b class="${annualCls(sv.annual)}">${annualTxt(sv.annual)}</b>${sv.annual?.rate != null ? `<small class="muted">за ${periodTxt(sv.annual.days)}</small>` : ''}</div></div></div>
+  ${profitChart()}
   ${segs.length ? `<div class="card"><div class="card-h"><span>Розподіл</span><span>${byCur.map(x => `${CUR[x.c]} ${fmt(x.v / sv.total * 100)}%`).join(' · ')}</span></div>
     <div class="chart-wrap">${donut(segs, short(sv.total), 'грн')}${legend(segs, sv.total)}</div></div>` : ''}
   ${groups}
   <p class="muted small" style="padding:0 18px">Поповнити — кнопка <b>+</b> внизу (переказ на рахунок накопичень, не рахується як витрата). Коли змінюється вартість — відкрийте рахунок і натисніть «Вартість».</p>`;
+}
+
+/* Прибуток/збиток накопичень по місяцях (без урахування ваших внесків) */
+function profitByMonth(n = 6) {
+  const ids = new Set(savAccs().map(a => a.id)), now = new Date(), out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    let y = now.getFullYear(), m = now.getMonth() - i; while (m < 0) { m += 12; y--; }
+    let v = 0;
+    for (const t of monthTx(y, m)) {
+      if (!ids.has(t.accountId)) continue;
+      if ((t.type === 'adjust' && !t.contrib) || t.type === 'income') v += txUAH(t);
+      else if (t.type === 'expense') v -= txUAH(t);
+    }
+    out.push({ y, m, v: r2(v) });
+  }
+  return out;
+}
+function profitChart() {
+  const arr = profitByMonth(), max = Math.max(...arr.map(a => Math.abs(a.v)), 1);
+  const hasNeg = arr.some(a => a.v < 0), hasPos = arr.some(a => a.v > 0);
+  const z = hasNeg && hasPos ? 50 : hasNeg ? 100 : 0, span = hasNeg && hasPos ? 50 : 100;
+  const sum = arr.reduce((s, a) => s + a.v, 0);
+  return `<div class="card"><div class="card-h"><span>Прибуток по місяцях</span><span class="${sum >= 0 ? 'green' : 'red'}">${sgn(sum)}${short(Math.abs(sum)).replace(/^/, sum < 0 ? '-' : '')} ₴ за 6 міс.</span></div>
+    <div class="pbars">${arr.map((a, i) => {
+      const h = Math.max(Math.abs(a.v) / max * span, a.v ? 2 : 0), pos = a.v >= 0;
+      const lbl = a.v ? `<small class="${pos ? 'green' : 'red'}" style="${pos ? `bottom:calc(${z + h}% + 3px)` : `top:calc(${100 - z + h}% + 3px)`}">${pos ? '+' : '-'}${short(Math.abs(a.v))}</small>` : '';
+      return `<div class="pb ${i === arr.length - 1 ? 'cur' : ''}">${a.v ? `<i class="${pos ? 'pos' : 'neg'}" style="${pos ? `bottom:${z}%` : `top:${100 - z}%`};height:${h}%"></i>` : ''}${lbl}</div>`;
+    }).join('')}<div class="zero" style="bottom:${z}%"></div></div>
+    <div class="pb-labels">${arr.map((a, i) => `<span class="${i === arr.length - 1 ? 'cur' : ''}">${MSHORT[a.m]}</span>`).join('')}</div></div>`;
 }
 
 const VIEWS = { tx: viewTx, charts: viewCharts, accounts: viewAccounts, invest: viewSavings };
