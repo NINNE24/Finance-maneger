@@ -1,5 +1,5 @@
 // Кеш для роботи без інтернету. Змініть версію після оновлення файлів.
-const CACHE = 'fm-v9';
+const CACHE = 'fm-v10';
 
 // Натискання на сповіщення — відкрити програму
 self.addEventListener('notificationclick', e => {

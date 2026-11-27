@@ -188,7 +188,8 @@ body.kb-open #sheet-root .sheet{padding-bottom:12px;border-radius:18px}
 .amount-box span{font-size:28px;color:var(--muted)}
 .cat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}
 .cat{display:flex;flex-direction:column;align-items:center;gap:5px;padding:8px 2px;border-radius:14px;font-size:11.5px;color:#ccc;text-align:center}
-.cat i{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:23px}
+.cat i{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;font-style:normal;color:#fff}
+.cat i .ci{width:54%;height:54%}
 .cat span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cat.on{background:var(--card2);box-shadow:inset 0 0 0 2px var(--acc);color:#fff}
 .emoji-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:4px}
